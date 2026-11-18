@@ -3,7 +3,20 @@
 import re
 import subprocess
 import sys
-from pathlib import PurePosixPath
+
+
+SKILL_ROOT = "skills/gmail-cleanup/"
+REVIEW_FILES = {
+    SKILL_ROOT + "SKILL.md",
+    SKILL_ROOT + "references/external-notifications.md",
+}
+SUPPORT_FILES = {".github/workflows/verify.yml", ".gitignore", "LICENSE", "README.md",
+                 "tools/check_public.py"}
+LEGACY_RELEASE = "1b3134ff1556dfcdba7d3abdfa0d2d4345e0656b"
+LEGACY_SKILL_FILES = REVIEW_FILES | {
+    SKILL_ROOT + "references/execution.md",
+    SKILL_ROOT + "scripts/verify.py",
+}
 
 
 def git(*args):
@@ -11,15 +24,8 @@ def git(*args):
 
 
 def verify(ref):
-    allowed = {
-        ".github/workflows/verify.yml", ".gitignore", "LICENSE", "README.md",
-        "skills/gmail-cleanup/SKILL.md",
-        "skills/gmail-cleanup/references/execution.md",
-        "skills/gmail-cleanup/references/external-notifications.md",
-        "skills/gmail-cleanup/scripts/verify.py",
-        "tests/test_verify.py", "tools/check_public.py",
-    }
-    commitments = git("rev-list", ref).decode().splitlines()
+    target = git("rev-parse", "--verify", "--end-of-options", ref + "^{commit}").decode().strip()
+    commits = git("rev-list", target).decode().splitlines()
     scanned = set()
     patterns = (
         rb"[\w.%+-]+@" rb"[\w.-]+\.[A-Za-z]{2,}",
@@ -30,25 +36,32 @@ def verify(ref):
         rb"-----BEGIN [A-Z ]*" rb"PRIVATE KEY-----",
         rb"(?i)(?:plugin|link)_" rb"[0-9a-f]{24,}",
     )
-    for commit in commitments:
+    for commit in commits:
+        if commit == LEGACY_RELEASE:
+            skill_files = LEGACY_SKILL_FILES
+            allowed = SUPPORT_FILES | skill_files | {"tests/test_verify.py"}
+        else:
+            skill_files = REVIEW_FILES
+            allowed = SUPPORT_FILES | skill_files | {"tests/test_public.py"}
+        included_skill_files = set()
         entries = git("ls-tree", "-r", "-z", commit).split(b"\x00")
         for entry in filter(None, entries):
             header, path_bytes = entry.split(b"\t", 1)
             mode, kind, oid = header.decode().split()
             path = path_bytes.decode()
             if path not in allowed or mode not in ("100644", "100755") or kind != "blob":
-                raise ValueError("Unexpected public file: " + path)
+                raise ValueError("Unexpected public file or file mode")
+            if path.startswith(SKILL_ROOT):
+                included_skill_files.add(path)
             if oid in scanned:
                 continue
             blob = git("cat-file", "blob", oid)
             if any(re.search(pattern, blob) for pattern in patterns):
                 raise ValueError("Private-data pattern in " + path)
             scanned.add(oid)
-    root = PurePosixPath("skills/gmail-cleanup")
-    entries = set(git("ls-tree", "-r", "--name-only", ref, str(root)).decode().splitlines())
-    if entries != {path for path in allowed if root in PurePosixPath(path).parents}:
-        raise ValueError("Unexpected skill payload")
-    print(f"Verified {len(scanned)} public blobs across {len(commitments)} commits")
+        if commit == target and included_skill_files != skill_files:
+            raise ValueError("Unexpected skill payload")
+    print(f"Verified {len(scanned)} public blobs across {len(commits)} commits")
 
 
 if __name__ == "__main__":
