@@ -17,6 +17,8 @@ class PublicPackageTests(unittest.TestCase):
         self.git("init", "--quiet")
         self.write(SKILL / "SKILL.md", "# Synthetic review\n")
         self.write(SKILL / "references/external-notifications.md", "# Synthetic reference\n")
+        self.write(SKILL / "references/execution.md", "# Synthetic execution\n")
+        self.write(SKILL / "scripts/verify.py", "# Synthetic validator\n")
 
     def git(self, *args):
         subprocess.run(("git", *args), cwd=self.repo, check=True, capture_output=True)
@@ -35,23 +37,24 @@ class PublicPackageTests(unittest.TestCase):
         return subprocess.run((sys.executable, str(CHECKER), ref), cwd=self.repo,
                               capture_output=True, text=True, check=False)
 
-    def test_allows_read_only_payload(self):
+    def test_allows_cleanup_payload(self):
         self.commit()
         result = self.check_package()
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def assert_rejects_legacy_file(self, filename):
-        self.write(SKILL / filename, "Synthetic legacy file\n")
+    def test_rejects_undeclared_script(self):
+        self.write(SKILL / "scripts/other.py", "# Synthetic extra script\n")
         self.commit()
         result = self.check_package()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Unexpected public file", result.stderr)
 
-    def test_rejects_legacy_execution_guide_in_new_commits(self):
-        self.assert_rejects_legacy_file("references/execution.md")
-
-    def test_rejects_legacy_validator_in_new_commits(self):
-        self.assert_rejects_legacy_file("scripts/verify.py")
+    def test_rejects_missing_validator(self):
+        (self.repo / SKILL / "scripts/verify.py").unlink()
+        self.commit()
+        result = self.check_package()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unexpected skill payload", result.stderr)
 
     def test_rejects_removed_required_reference(self):
         (self.repo / SKILL / "references/external-notifications.md").unlink()

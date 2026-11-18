@@ -12,11 +12,15 @@ REVIEW_FILES = {
 }
 SUPPORT_FILES = {".github/workflows/verify.yml", ".gitignore", "LICENSE", "README.md",
                  "tools/check_public.py"}
-LEGACY_RELEASE = "1b3134ff1556dfcdba7d3abdfa0d2d4345e0656b"
-LEGACY_SKILL_FILES = REVIEW_FILES | {
+CLEANUP_FILES = REVIEW_FILES | {
     SKILL_ROOT + "references/execution.md",
     SKILL_ROOT + "scripts/verify.py",
 }
+HISTORICAL_LAYOUTS = {
+    "1b3134ff1556dfcdba7d3abdfa0d2d4345e0656b": (CLEANUP_FILES, {"tests/test_verify.py"}),
+    "66a35ddf420387e88e7d523419366fe4f00b6139": (REVIEW_FILES, {"tests/test_public.py"}),
+}
+CURRENT_LAYOUT = (CLEANUP_FILES, {"tests/test_public.py", "tests/test_verify.py"})
 
 
 def git(*args):
@@ -37,12 +41,8 @@ def verify(ref):
         rb"(?i)(?:plugin|link)_" rb"[0-9a-f]{24,}",
     )
     for commit in commits:
-        if commit == LEGACY_RELEASE:
-            skill_files = LEGACY_SKILL_FILES
-            allowed = SUPPORT_FILES | skill_files | {"tests/test_verify.py"}
-        else:
-            skill_files = REVIEW_FILES
-            allowed = SUPPORT_FILES | skill_files | {"tests/test_public.py"}
+        skill_files, test_files = HISTORICAL_LAYOUTS.get(commit, CURRENT_LAYOUT)
+        allowed = SUPPORT_FILES | skill_files | test_files
         included_skill_files = set()
         entries = git("ls-tree", "-r", "-z", commit).split(b"\x00")
         for entry in filter(None, entries):

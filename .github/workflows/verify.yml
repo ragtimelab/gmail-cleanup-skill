@@ -12,4 +12,5 @@ jobs:
           persist-credentials: false
       - run: python3 -m unittest discover -s tests
       - run: python3 tools/check_public.py v0.1.0
+      - run: python3 tools/check_public.py v0.2.0
       - run: python3 tools/check_public.py HEAD
