@@ -10,9 +10,20 @@ Use the exact verified commit SHA from the release notes.
 gh skill install ragtimelab/gmail-cleanup-skill gmail-cleanup --agent codex --scope user --pin VERIFIED_COMMIT_SHA
 ```
 
-For a project-scope installation, use `--scope project` from that project. In a fresh Codex session with Gmail connected, ask `$gmail-cleanup` to review your mail. It defaults to the inbox of every connected account and checks related archived or sent mail when needed. You can narrow the scope in your request.
+For a project-scope installation, use `--scope project` from that project. In a fresh Codex session with Gmail connected, use:
 
-The skill reports action needed, waiting or tracked, keep, and Trash candidates by account. Marketing mail can be proposed when it has no remaining action or record value. Read general notices about terms, privacy, or product settings can also be proposed when they have no remaining action or evidence to preserve and no indication that you want them kept. Review the fixed proposal and approve the exact subset you want moved. The skill rereads that subset, uses Gmail's dedicated Trash operation for eligible messages, and verifies the resulting labels and read state.
+| Request | Review |
+|---|---|
+| `$gmail-cleanup` | New inbox arrivals since each account's last completed review. Accounts without a checkpoint start with a full inbox review. |
+| `$gmail-cleanup 전체` or “review the whole inbox” | Review the whole inbox and refresh the checkpoint for each completed account. |
+| `$gmail-cleanup 최근 7일` or “review the last seven days” | Review that period without advancing checkpoints. |
+| `$gmail-cleanup 기준점 초기화` or “reset checkpoints” | Clear the local checkpoints for the selected accounts, or all accounts if none are specified. |
+
+The default covers every connected Gmail account. You can name individual accounts. Incremental review finds new deliveries, including new replies. To review older mail after it was read or moved back to the inbox, request a whole-inbox or period review.
+
+The skill reports how many messages it reviewed, how many were unread in that scope, what needs attention, and which messages qualify as Trash candidates. Only read messages qualify when they have no remaining action, retention signal, or evidence to preserve. The official Gmail connector moves only the exact messages you approve and verifies their final labels and read state.
+
+The local checkpoint cache lives in `.cache/` inside the installed skill. Removing that directory clears the checkpoint state. Removing the entire installation also clears it. An in-place update can reuse compatible state if the installer preserves the cache. When storage is unavailable, review still works without saving checkpoints. The cache contains no message IDs, bodies, or approvals.
 
 ## Release verification
 

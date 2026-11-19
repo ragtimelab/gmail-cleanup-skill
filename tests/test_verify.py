@@ -10,7 +10,7 @@ from verify import check, seal
 
 def candidate(account, message_id):
     return {"account": account, "id": message_id, "subject": "Past event",
-            "reason": "Registration closed", "labels": ["INBOX", "UNREAD"]}
+            "reason": "Registration closed", "labels": ["INBOX", "IMPORTANT"]}
 
 
 def identity(account, message_id):
@@ -46,18 +46,18 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual(seal(other)[1], seal(self.manifest)[1])
 
     def test_ready_requires_unchanged_labels_and_approval(self):
-        self.observe(["INBOX", "UNREAD"])
+        self.observe(["INBOX", "IMPORTANT"])
         self.assertEqual(check(self.payload)["ready"], [self.first])
-        self.observe(["INBOX", "UNREAD", "STARRED"])
+        self.observe(["INBOX", "STARRED"])
         self.assertEqual(len(check(self.payload)["held"]), 1)
 
     def test_no_blind_retry_missing_or_held(self):
         self.assertEqual(len(check(self.payload)["held"]), 1)
-        self.observe(["INBOX", "UNREAD"], hold=True)
+        self.observe(["INBOX", "IMPORTANT"], hold=True)
         self.assertFalse(check(self.payload)["ready"])
 
     def test_completed_retry_is_not_sent_again(self):
-        self.observe(["TRASH", "UNREAD"])
+        self.observe(["TRASH"])
         self.assertEqual(check(self.payload)["already_trashed"], [self.first])
         self.payload["phase"] = "after"
         self.assertEqual(check(self.payload)["verified"], [self.first])
@@ -66,8 +66,8 @@ class VerifyTests(unittest.TestCase):
         self.payload["approval"]["items"].append(self.second)
         self.payload["batch"].append(self.second)
         self.payload["observed"] = [
-            {**self.first, "labels": ["TRASH", "UNREAD"]},
-            {**self.second, "labels": ["INBOX", "UNREAD"]},
+            {**self.first, "labels": ["TRASH"]},
+            {**self.second, "labels": ["INBOX", "IMPORTANT"]},
         ]
         self.payload["phase"] = "after"
         self.assertEqual(check(self.payload)["verified"], [self.first])
@@ -76,9 +76,19 @@ class VerifyTests(unittest.TestCase):
 
     def test_inbox_or_read_state_incorrect_after_write(self):
         self.payload["phase"] = "after"
-        for flags in (["TRASH"], ["TRASH", "INBOX", "UNREAD"]):
+        for flags in (["TRASH", "UNREAD"], ["TRASH", "INBOX"]):
             self.observe(flags)
             self.assertFalse(check(self.payload)["verified"])
+
+    def test_unread_candidate_is_rejected(self):
+        self.manifest["items"][0]["labels"].append("UNREAD")
+        with self.assertRaises(ValueError):
+            seal(self.manifest)
+
+    def test_approved_message_that_becomes_unread_is_held(self):
+        self.observe(["INBOX", "IMPORTANT", "UNREAD"])
+        self.assertFalse(check(self.payload)["ready"])
+        self.assertEqual(check(self.payload)["held"][0]["reason"], "hold_or_label_change")
 
     def test_cli_rejects_duplicate_json_fields(self):
         script = Path(__file__).resolve().parents[1] / "skills/gmail-cleanup/scripts/verify.py"

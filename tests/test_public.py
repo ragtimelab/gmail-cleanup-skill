@@ -19,6 +19,8 @@ class PublicPackageTests(unittest.TestCase):
         self.write(SKILL / "references/external-notifications.md", "# Synthetic reference\n")
         self.write(SKILL / "references/execution.md", "# Synthetic execution\n")
         self.write(SKILL / "scripts/verify.py", "# Synthetic validator\n")
+        self.write(SKILL / "scripts/checkpoints.py", "# Synthetic checkpoint helper\n")
+        self.write(SKILL / "references/incremental-review.md", "# Synthetic scope reference\n")
 
     def git(self, *args):
         subprocess.run(("git", *args), cwd=self.repo, check=True, capture_output=True)
@@ -41,6 +43,11 @@ class PublicPackageTests(unittest.TestCase):
         self.commit()
         result = self.check_package()
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_rejects_committed_runtime_cache(self):
+        self.write(SKILL / ".cache/checkpoints.json", "{}")
+        self.commit()
+        self.assertNotEqual(self.check_package().returncode, 0)
 
     def test_rejects_undeclared_script(self):
         self.write(SKILL / "scripts/other.py", "# Synthetic extra script\n")
