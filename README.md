@@ -12,7 +12,7 @@ gh skill install ragtimelab/gmail-cleanup-skill gmail-cleanup --agent codex --sc
 
 For a project-scope installation, use `--scope project` from that project. In a fresh Codex session with Gmail connected, ask `$gmail-cleanup` to review your mail. It defaults to the inbox of every connected account and checks related archived or sent mail when needed. You can narrow the scope in your request.
 
-The skill reports action needed, waiting or tracked, keep, and Trash candidates by account. Ads, promotions (including unexpired offers), and newsletters are eligible for proposal by default when the individual message has no remaining action or record value. You can specify mail to keep. Review the fixed proposal and approve the exact subset you want moved. The skill rereads that subset, uses Gmail's dedicated Trash operation for eligible messages, and verifies the resulting labels and read state.
+The skill reports action needed, waiting or tracked, keep, and Trash candidates by account. Marketing mail can be proposed when it has no remaining action or record value. Read general notices about terms, privacy, or product settings can also be proposed when they have no remaining action or evidence to preserve and no indication that you want them kept. Review the fixed proposal and approve the exact subset you want moved. The skill rereads that subset, uses Gmail's dedicated Trash operation for eligible messages, and verifies the resulting labels and read state.
 
 ## Release verification
 
