@@ -15,9 +15,9 @@ For a project-scope installation, use `--scope project` from that project. In a 
 | Request | Review |
 |---|---|
 | `$gmail-cleanup` | New inbox arrivals since each account's last completed review. Accounts without a checkpoint start with a full inbox review. |
-| `$gmail-cleanup 전체` or “review the whole inbox” | Review the whole inbox and refresh the checkpoint for each completed account. |
-| `$gmail-cleanup 최근 7일` or “review the last seven days” | Review that period without advancing checkpoints. |
-| `$gmail-cleanup 기준점 초기화` or “reset checkpoints” | Clear the local checkpoints for the selected accounts, or all accounts if none are specified. |
+| `$gmail-cleanup Review the whole inbox.` | Review the whole inbox and refresh the checkpoint for each completed account. |
+| `$gmail-cleanup Review the last seven days.` | Review that period without advancing checkpoints. |
+| `$gmail-cleanup Reset checkpoints.` | Clear the local checkpoints for the selected accounts, or all accounts if none are specified. |
 
 The default covers every connected Gmail account. You can name individual accounts. Incremental review finds new deliveries, including new replies. To review older mail after it was read or moved back to the inbox, request a whole-inbox or period review.
 
