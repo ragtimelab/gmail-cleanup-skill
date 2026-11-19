@@ -46,7 +46,7 @@ def seal(manifest):
         require(isinstance(row["subject"], str) and isinstance(row["reason"], str)
                 and bool(row["reason"].strip()), "Invalid subject or review reason")
         flags = labels(row)
-        require(not flags.intersection({"TRASH", "SPAM", "SENT", "DRAFT"}),
+        require(not flags.intersection({"TRASH", "SPAM", "SENT", "DRAFT", "UNREAD"}),
                 "Ineligible initial message labels")
         canonical.append({**row, "labels": sorted(flags)})
     encoded = json.dumps(canonical, ensure_ascii=True, sort_keys=True,

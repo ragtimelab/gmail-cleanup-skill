@@ -16,11 +16,21 @@ CLEANUP_FILES = REVIEW_FILES | {
     SKILL_ROOT + "references/execution.md",
     SKILL_ROOT + "scripts/verify.py",
 }
+LEGACY_LAYOUT = (CLEANUP_FILES, {"tests/test_public.py", "tests/test_verify.py"})
 HISTORICAL_LAYOUTS = {
+    "0497426b6cad1e751d93dda9fd0f33fd5168fa7a": LEGACY_LAYOUT,
+    "2d5349ed96f4917fe5db5cd571bf8cd5c0f1ea50": LEGACY_LAYOUT,
+    "15f172eb8cd8e6794a5fa696d518827ecc66b458": LEGACY_LAYOUT,
     "1b3134ff1556dfcdba7d3abdfa0d2d4345e0656b": (CLEANUP_FILES, {"tests/test_verify.py"}),
     "66a35ddf420387e88e7d523419366fe4f00b6139": (REVIEW_FILES, {"tests/test_public.py"}),
 }
-CURRENT_LAYOUT = (CLEANUP_FILES, {"tests/test_public.py", "tests/test_verify.py"})
+CURRENT_LAYOUT = (
+    CLEANUP_FILES | {
+        SKILL_ROOT + "references/incremental-review.md",
+        SKILL_ROOT + "scripts/checkpoints.py",
+    },
+    LEGACY_LAYOUT[1] | {"tests/test_checkpoints.py"},
+)
 
 
 def git(*args):
