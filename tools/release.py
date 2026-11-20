@@ -8,6 +8,7 @@ import re
 import subprocess
 import tarfile
 import tempfile
+import time
 
 from check_public import verify
 
@@ -55,8 +56,11 @@ def verify_main(sha):
 
 def package(directory, sha, tag):
     archive = directory / f"gmail-cleanup-{tag}.tar.gz"
+    # Archiving a tree defaults to the current time. Use the commit's timestamp
+    # so a new process can compare its archive against a previous draft upload.
+    mtime = run("git", "show", "-s", "--format=%ct", sha).decode().strip()
     archive.write_bytes(run("git", "archive", "--format=tar.gz", "--prefix=gmail-cleanup/",
-                            f"{sha}:{SKILL}"))
+                            f"--mtime={mtime}", f"{sha}:{SKILL}"))
     expected = set(run("git", "ls-tree", "-r", "--name-only", f"{sha}:{SKILL}").decode().splitlines())
     with tarfile.open(archive) as bundle:
         members = [m for m in bundle.getmembers() if not m.isdir()]
@@ -77,6 +81,16 @@ def find_release(tag):
                "--jq", f'.[] | select(.tag_name == "{tag}")').splitlines()
     require(len(rows) <= 1, "Multiple releases match tag")
     return json.loads(rows[0]) if rows else None
+
+
+def wait_for_release(tag):
+    for delay in (0, 1, 2, 4):
+        if delay:
+            time.sleep(delay)
+        release = find_release(tag)
+        if release is not None:
+            return release
+    raise ValueError("Created release is not visible yet; check remote state before retrying")
 
 
 def verify_assets(release, assets):
@@ -109,7 +123,7 @@ def publish(directory, sha, tag, notes, assets):
     if release is None:
         run("gh", "release", "create", tag, "-R", REPO, "--verify-tag", "--draft",
             "--title", f"Gmail Cleanup {tag}", "--notes-file", str(notes))
-        release = find_release(tag)
+        release = wait_for_release(tag)
     require(release is not None and (release.get("body") or "").rstrip("\n") == notes.read_text().rstrip("\n"),
             "Existing release notes differ from the requested release")
     missing = verify_assets(release, assets)
