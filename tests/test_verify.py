@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/gmail-cleanup/scripts"))
-from verify import check, seal
+from verify import approve, check, reconcile, seal
 
 
 def candidate(account, message_id):
@@ -21,10 +21,15 @@ class VerifyTests(unittest.TestCase):
     def setUp(self):
         self.first = identity("sample-a", "abc")
         self.second = identity("sample-b", "abc")
-        self.manifest = {"items": [candidate("sample-a", "abc"), candidate("sample-b", "abc")]}
+        self.manifest = {"items": [candidate("sample-a", "abc"), candidate("sample-b", "abc")],
+                         "protected_labels": {"sample-a": ["Label_keep"], "sample-b": []}}
         self.payload = {"manifest": self.manifest,
                         "approval": {"digest": seal(self.manifest)[1], "items": [self.first]},
                         "batch": [self.first], "observed": [], "phase": "before"}
+        self.freeze_approval()
+
+    def freeze_approval(self):
+        self.payload["approval_digest"] = approve(*seal(self.manifest), self.payload["approval"])[1]
 
     def observe(self, flags, **extra):
         self.payload["observed"] = [{**self.first, "labels": flags, **extra}]
@@ -64,6 +69,7 @@ class VerifyTests(unittest.TestCase):
 
     def test_partial_success_limits_retry_to_unmoved_approved_messages(self):
         self.payload["approval"]["items"].append(self.second)
+        self.freeze_approval()
         self.payload["batch"].append(self.second)
         self.payload["observed"] = [
             {**self.first, "labels": ["TRASH"]},
@@ -89,6 +95,26 @@ class VerifyTests(unittest.TestCase):
         self.observe(["INBOX", "IMPORTANT", "UNREAD"])
         self.assertFalse(check(self.payload)["ready"])
         self.assertEqual(check(self.payload)["held"][0]["reason"], "hold_or_label_change")
+
+    def test_original_candidate_must_be_in_inbox_and_unprotected(self):
+        for flags in (["INBOX", "STARRED"], ["IMPORTANT"], ["INBOX", "Label_keep"]):
+            with self.subTest(flags=flags):
+                self.manifest["items"][0]["labels"] = flags
+                with self.assertRaises(ValueError):
+                    seal(self.manifest)
+
+    def test_changed_approval_subset_does_not_match_frozen_digest(self):
+        self.payload["approval"]["items"].append(self.second)
+        with self.assertRaises(ValueError):
+            check(self.payload)
+
+    def test_reconciliation_tracks_missing_details_by_account(self):
+        expected = [self.first, self.second]
+        self.assertEqual(reconcile({"expected": expected, "reviewed": [self.first]})["missing"],
+                         [self.second])
+        self.assertEqual(reconcile({"expected": expected, "reviewed": expected})["status"],
+                         "complete")
+        self.assertEqual(reconcile({"expected": [], "reviewed": []})["status"], "complete")
 
     def test_cli_rejects_duplicate_json_fields(self):
         script = Path(__file__).resolve().parents[1] / "skills/gmail-cleanup/scripts/verify.py"
