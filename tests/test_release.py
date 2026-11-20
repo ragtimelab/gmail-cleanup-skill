@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from release import verify_main
+from release import verify_main, wait_for_release
 
 
 class ReleaseGateTests(unittest.TestCase):
@@ -16,6 +16,11 @@ class ReleaseGateTests(unittest.TestCase):
         self.run = {"head_sha": self.sha, "head_branch": "main", "event": "push", "id": 19,
                     "run_attempt": 2, "html_url": "https://example.invalid/run/19",
                     "status": "completed", "conclusion": "success"}
+
+    def test_new_draft_can_take_time_to_appear(self):
+        draft = {"draft": True}
+        with patch("release.find_release", side_effect=[None, draft]), patch("release.time.sleep"):
+            self.assertEqual(wait_for_release("v1.0.0"), draft)
 
     def test_uses_exact_main_run_and_its_specific_attempt(self):
         with patch("release.api", side_effect=[{"workflow_runs": [self.run]},
