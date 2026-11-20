@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Manage local review checkpoints. This helper does not access Gmail."""
+"""Manage installation-local review state without accessing Gmail."""
 
 import argparse
 from contextlib import contextmanager
+import errno
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import sys
 import tempfile
@@ -18,10 +21,22 @@ else:
 
 
 LEASE_SECONDS = 30 * 60
+LOCK_SECONDS = 5
 
 
-class StateError(ValueError):
-    pass
+class Failure(Exception):
+    def __init__(self, status, phase, error=None):
+        self.result = {"status": status, "phase": phase}
+        if error is not None:
+            self.result["errno"] = error
+
+
+@contextmanager
+def phase(name):
+    try:
+        yield
+    except OSError as error:
+        raise Failure("storage_error", name, error.errno) from None
 
 
 def timestamp(value):
@@ -29,9 +44,11 @@ def timestamp(value):
 
 
 def account_key(value):
-    if not value or value != value.strip():
-        raise StateError("Invalid connector account identifier")
-    return value
+    return isinstance(value, str) and bool(value) and value == value.strip()
+
+
+def token_key(value):
+    return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{32}", value) is not None
 
 
 def review_query(start, end):
@@ -39,123 +56,213 @@ def review_query(start, end):
     return f"in:inbox{lower} before:{end}"
 
 
-def load(path):
+def reject_symlink(path, step):
     if path.is_symlink():
-        raise StateError("Cache paths must not be symbolic links")
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        return None
+        raise Failure("state_invalid", step)
+
+
+def load(path):
+    with phase("read"):
+        reject_symlink(path, "read")
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (ValueError, RecursionError):
+            raise Failure("state_invalid", "validate") from None
 
 
 def save(path, value):
-    descriptor, temporary = tempfile.mkstemp(dir=path.parent)
+    with phase("write"):
+        descriptor, temporary = tempfile.mkstemp(dir=path.parent)
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        with phase("write"), os.fdopen(descriptor, "w", encoding="utf-8") as output:
             json.dump(value, output, sort_keys=True, allow_nan=False)
             output.write("\n")
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temporary, path)
+        with phase("replace"):
+            os.replace(temporary, path)
     finally:
-        Path(temporary).unlink(missing_ok=True)
+        with phase("write"):
+            Path(temporary).unlink(missing_ok=True)
 
 
 @contextmanager
 def locked(cache):
-    if cache.is_symlink():
-        raise StateError("Cache directory must not be a symbolic link")
-    cache.mkdir(mode=0o700, exist_ok=True)
+    with phase("mkdir"):
+        reject_symlink(cache, "mkdir")
+        cache.mkdir(mode=0o700, exist_ok=True)
     lock_path = cache / "checkpoints.lock"
-    if lock_path.is_symlink():
-        raise StateError("Lock path must not be a symbolic link")
-    with os.fdopen(os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600), "r+b") as lock:
-        if os.name == "nt":
-            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+    with phase("lock"):
+        reject_symlink(lock_path, "lock")
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        lock = os.fdopen(os.open(lock_path, flags, 0o600), "r+b")
+    with lock:
+        deadline = time.monotonic() + LOCK_SECONDS
+        while True:
+            try:
+                if os.name == "nt":
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as error:
+                if error.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise Failure("storage_error", "lock", error.errno) from None
+                if time.monotonic() >= deadline:
+                    raise Failure("lock_timeout", "lock") from None
+                time.sleep(0.05)
         yield
 
 
-def read_checkpoints(path):
-    try:
-        state = load(path)
-        if state is None:
-            return {}, path.exists()
-        entries = state["accounts"]
-        if state["version"] != 1 or not isinstance(entries, dict):
-            raise ValueError
-        valid = {key: end for key, end in entries.items()
-                 if key and key == key.strip() and timestamp(end)}
-        return valid, len(valid) != len(entries)
-    except (KeyError, TypeError, ValueError) as error:
-        if isinstance(error, StateError):
-            raise
-        return {}, True
+def valid_leases(leases):
+    return isinstance(leases, dict) and all(
+        account_key(key) and isinstance(lease, dict)
+        and token_key(lease.get("token")) and timestamp(lease.get("end"))
+        and timestamp(lease.get("expires"))
+        for key, lease in leases.items()
+    )
+
+
+def valid_receipts(receipts, entries):
+    return isinstance(receipts, dict) and all(
+        key in entries and isinstance(digest, str)
+        and re.fullmatch(r"[0-9a-f]{64}", digest)
+        for key, digest in receipts.items()
+    )
+
+
+def read_state(cache, now):
+    path = cache / "checkpoints.json"
+    state = load(path)
+    if state is None and not path.exists():
+        state = {"version": 1, "accounts": {}}
+    if not isinstance(state, dict) or type(state.get("version")) is not int:
+        raise Failure("state_invalid", "validate")
+    entries = state.get("accounts")
+    if not isinstance(entries, dict):
+        raise Failure("state_invalid", "validate")
+    valid = {key: end for key, end in entries.items() if account_key(key) and timestamp(end)}
+    damaged = len(valid) != len(entries)
+    if state["version"] == 1:
+        legacy_path = cache / "leases.json"
+        leases = load(legacy_path)
+        if leases is None and not legacy_path.exists():
+            leases = {}
+        if not valid_leases(leases):
+            raise Failure("state_invalid", "validate")
+        if any(lease["expires"] > now for lease in leases.values()):
+            return None, damaged
+        return {"version": 2, "accounts": valid, "leases": {}, "receipts": {}}, damaged
+    leases = state.get("leases")
+    receipts = state.get("receipts")
+    if state["version"] != 2 or damaged or not valid_leases(leases) or not valid_receipts(receipts, valid):
+        raise Failure("state_invalid", "validate")
+    state["leases"] = {key: lease for key, lease in leases.items() if lease["expires"] > now}
+    return state, False
 
 
 def operate(cache, command, account=None, *, end=None, full=False, token=None, now=None):
-    if account is not None:
-        account_key(account)
+    if (command != "reset" or account is not None) and not account_key(account):
+        raise Failure("invalid_input", "validate")
+    if command == "begin" and not timestamp(end):
+        raise Failure("invalid_input", "validate")
+    if command in {"renew", "finish", "release"} and not token_key(token):
+        raise Failure("invalid_input", "validate")
+
     with locked(cache):
         now = int(time.time()) if now is None else now
+        if command == "begin" and end > now:
+            raise Failure("invalid_input", "validate")
+        state, damaged = read_state(cache, now)
+        if state is None:
+            return {"status": "busy", "reason": "legacy_active"}
+        entries = state["accounts"]
+        leases = state["leases"]
+        receipts = state["receipts"]
         state_path = cache / "checkpoints.json"
-        lease_path = cache / "leases.json"
-        entries, damaged = read_checkpoints(state_path)
-        leases = load(lease_path) or {}
-        if not isinstance(leases, dict) or any(
-            not isinstance(lease, dict)
-            or not isinstance(lease.get("token"), str)
-            or not timestamp(lease.get("end"))
-            or not timestamp(lease.get("expires"))
-            for lease in leases.values()
-        ):
-            raise StateError("Invalid execution leases")
-        leases = {key: lease for key, lease in leases.items() if lease["expires"] > now}
-
-        def write_entries():
-            save(state_path, {"version": 1, "accounts": entries})
 
         if command == "reset":
-            if account is None:
-                if leases:
-                    return {"status": "busy"}
-                entries.clear()
-            elif account in leases:
+            if (account is None and leases) or account in leases:
                 return {"status": "busy"}
+            if account is None:
+                entries.clear()
+                receipts.clear()
             else:
                 entries.pop(account, None)
-            write_entries()
+                receipts.pop(account, None)
+            save(state_path, state)
             return {"status": "reset"}
 
         previous = entries.get(account)
         if command == "begin":
-            if not timestamp(end) or end > now:
-                raise StateError("Invalid review end")
             if account in leases:
                 return {"status": "busy"}
             if previous is not None and end < previous:
                 return {"status": "clock_regressed", "previous": previous}
             token = secrets.token_hex(16)
             leases[account] = {"token": token, "end": end, "expires": now + LEASE_SECONDS}
-            save(lease_path, leases)
+            receipts.pop(account, None)
+            save(state_path, state)
             start = None if full else previous
             return {"status": "started", "token": token, "start": start, "end": end,
                     "query": review_query(start, end), "cache_rebuild": damaged}
 
         lease = leases.get(account)
-        if not lease or not secrets.compare_digest(lease["token"], token or ""):
+        digest = hashlib.sha256(token.encode("ascii")).hexdigest()
+        if not lease or not secrets.compare_digest(lease["token"], token):
+            if command == "finish" and not lease and receipts.get(account) == digest:
+                return {"status": "saved", "end": entries[account]}
             return {"status": "lease_lost"}
         if command == "renew":
             lease["expires"] = now + LEASE_SECONDS
-            save(lease_path, leases)
+            save(state_path, state)
             return {"status": "renewed"}
         del leases[account]
-        save(lease_path, leases)
         if command == "finish":
             entries[account] = lease["end"]
-            write_entries()
-        return {"status": "saved" if command == "finish" else "released"}
+            receipts[account] = digest
+        save(state_path, state)
+        if command == "finish":
+            return {"status": "saved", "end": lease["end"]}
+        return {"status": "released"}
+
+
+def diagnose(root, action, probe_id=None):
+    if action == "create":
+        probe_id = secrets.token_hex(16)
+    elif not token_key(probe_id):
+        raise Failure("invalid_input", "validate")
+    probe = root / f".cache-probe-{probe_id}"
+    if action in {"read", "clean"}:
+        reject_symlink(probe, "read")
+        marker = load(probe / "marker.json")
+        if marker != {"probe": probe_id}:
+            return {"status": "probe_missing"}
+        if action == "clean":
+            with phase("write"):
+                (probe / "marker.json").unlink()
+                (probe / "checkpoints.lock").unlink()
+                probe.rmdir()
+        return {"status": "probe_found" if action == "read" else "probe_removed"}
+    marker = probe / "marker.json"
+    try:
+        with locked(probe):
+            save(marker, {"probe": probe_id})
+            save(marker, {"probe": probe_id})
+            if load(marker) != {"probe": probe_id}:
+                raise Failure("state_invalid", "validate")
+    except Failure:
+        if probe.is_dir() and not probe.is_symlink():
+            try:
+                marker.unlink(missing_ok=True)
+                (probe / "checkpoints.lock").unlink(missing_ok=True)
+                probe.rmdir()
+            except OSError:
+                pass
+        raise
+    return {"status": "probe_created", "probe_id": probe_id}
 
 
 def main():
@@ -170,14 +277,28 @@ def main():
         command.add_argument("account")
         command.add_argument("token")
     commands.add_parser("reset").add_argument("account", nargs="?")
+    probe = commands.add_parser("diagnose")
+    probe.add_argument("action", choices=("create", "read", "clean"))
+    probe.add_argument("probe_id", nargs="?")
     args = vars(parser.parse_args())
-    cache = Path(__file__).resolve().parents[1] / ".cache"
+    root = Path(__file__).resolve().parents[1]
+    diagnostic = args.get("command") == "diagnose"
+    code = 0
     try:
-        result = operate(cache, **args)
-    except (OSError, StateError, ValueError):
-        result = {"status": "cache_unavailable"}
+        if diagnostic:
+            args.pop("command")
+            result = diagnose(root, **args)
+        else:
+            result = operate(root / ".cache", **args)
+    except Failure as error:
+        result = error.result
+        code = 1
+    if diagnostic:
+        fingerprint = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        result.update({"installation": str(root), "helper_sha256": fingerprint, "state_version": 2})
     print(json.dumps(result, sort_keys=True))
+    return code
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

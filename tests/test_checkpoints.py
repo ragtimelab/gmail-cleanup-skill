@@ -1,11 +1,15 @@
+import errno
 import json
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/gmail-cleanup/scripts"))
-from checkpoints import LEASE_SECONDS, operate, review_query
+from checkpoints import Failure, LEASE_SECONDS, diagnose, locked, operate, review_query
 
 
 class CheckpointTests(unittest.TestCase):
@@ -71,9 +75,64 @@ class CheckpointTests(unittest.TestCase):
 
     def test_unavailable_cache_never_touches_another_path(self):
         self.cache.write_text("blocked")
-        with self.assertRaises(OSError):
+        with self.assertRaises(Failure) as raised:
             self.run_state("begin", end=180)
+        self.assertEqual(raised.exception.result["phase"], "mkdir")
         self.assertEqual(self.cache.read_text(), "blocked")
+
+    def test_finish_write_failure_keeps_prior_boundary_and_active_lease(self):
+        first = self.run_state("begin", end=170)
+        self.run_state("finish", token=first["token"])
+        second = self.run_state("begin", end=180)
+        path = self.cache / "checkpoints.json"
+        before = path.read_bytes()
+        with patch("checkpoints.os.replace", side_effect=OSError(errno.ENOSPC, "full")):
+            with self.assertRaises(Failure) as raised:
+                self.run_state("finish", token=second["token"])
+        self.assertEqual(raised.exception.result,
+                         {"status": "storage_error", "phase": "replace", "errno": errno.ENOSPC})
+        self.assertEqual(path.read_bytes(), before)
+        expected = {"status": "saved", "end": 180}
+        self.assertEqual(self.run_state("finish", token=second["token"]), expected)
+        self.assertEqual(self.run_state("finish", token=second["token"]), expected)
+
+    def test_active_legacy_run_blocks_migration_and_corrupt_state_fails_closed(self):
+        self.cache.mkdir()
+        leases = self.cache / "leases.json"
+        leases.write_text(json.dumps({"sample-a": {"token": "a" * 32, "end": 150, "expires": 205}}))
+        self.assertEqual(self.run_state("begin", end=180)["reason"], "legacy_active")
+        leases.write_text("{")
+        with self.assertRaises(Failure) as raised:
+            self.run_state("begin", end=180)
+        self.assertEqual(raised.exception.result["status"], "state_invalid")
+        self.assertEqual(leases.read_text(), "{")
+
+    def test_lock_timeout_does_not_delete_lock(self):
+        with locked(self.cache), patch("checkpoints.LOCK_SECONDS", 0):
+            with self.assertRaises(Failure) as raised:
+                self.run_state("begin", end=180)
+        self.assertEqual(raised.exception.result["status"], "lock_timeout")
+        self.assertTrue((self.cache / "checkpoints.lock").is_file())
+
+    def test_diagnose_round_trip_does_not_touch_real_cache(self):
+        root = self.cache.parent
+        result = diagnose(root, "create")
+        self.assertEqual(diagnose(root, "read", result["probe_id"])["status"], "probe_found")
+        self.assertEqual(diagnose(root, "clean", result["probe_id"])["status"], "probe_removed")
+        self.assertFalse(self.cache.exists())
+        self.assertFalse(list(root.iterdir()))
+
+    def test_installed_cli_reports_structured_failure_without_echoing_inputs(self):
+        scripts = self.cache.parent / "scripts"
+        scripts.mkdir()
+        source = Path(sys.modules["checkpoints"].__file__)
+        script = shutil.copy2(source, scripts)
+        self.cache.write_text("not a directory")
+        result = subprocess.run([sys.executable, script, "begin", "sample-private", "42"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(json.loads(result.stdout)["phase"], "mkdir")
+        self.assertNotIn("sample-private", result.stdout + result.stderr)
 
     def test_one_off_query_has_no_checkpoint_dependency(self):
         self.assertEqual(review_query(100, 200), "in:inbox after:100 before:200")

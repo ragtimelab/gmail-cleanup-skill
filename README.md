@@ -21,9 +21,9 @@ For a project-scope installation, use `--scope project` from that project. In a 
 
 The default covers every connected Gmail account. You can name individual accounts. Incremental review finds new deliveries, including new replies. To review older mail after it was read or moved back to the inbox, request a whole-inbox or period review.
 
-The skill reports how many messages it reviewed, how many were unread in that scope, what needs attention, and which messages qualify as Trash candidates. Only read messages qualify when they have no remaining action, retention signal, or evidence to preserve. The official Gmail connector moves only the exact messages you approve and verifies their final labels and read state.
+The skill reports how many messages it reviewed, how many were unread in that scope, what needs attention, and which messages qualify as Trash candidates. Only read messages qualify when they have no remaining action, retention signal, or evidence to preserve. The skill freezes the exact set you approve, uses the official Gmail connector to move eligible approved messages, and reads back their final labels and read state.
 
-The local checkpoint cache lives in `.cache/` inside the installed skill. Removing that directory clears the checkpoint state. Removing the entire installation also clears it. An in-place update can reuse compatible state if the installer preserves the cache. When storage is unavailable, review still works without saving checkpoints. The cache contains no message IDs, bodies, or approvals.
+The local checkpoint cache lives in `.cache/` inside the installed skill. Removing that directory clears the checkpoint state. Removing the entire installation also clears it. An in-place update can reuse compatible state if the installer preserves the cache. When storage is unavailable, review still works without saving checkpoints. Incremental review requires writable install-local storage shared by successive sessions. Verify this in your ChatGPT Work execution environment with the diagnostic in the skill before relying on Work checkpoints. The cache contains no message IDs, bodies, or approvals.
 
 ## Release verification
 
@@ -43,6 +43,6 @@ Verify a fresh Codex session can review all connected accounts through Gmail. Ke
 
 ## Migration from an older version
 
-Locate older installations with `gh skill list` and move their skill directories outside all agent skill search paths. In-place installation with `--force` can leave obsolete files behind. Install the verified release into a clean target, start a fresh session, and discard approvals and manifests from earlier sessions.
+Locate older installations with `gh skill list` and move their skill directories outside all agent skill search paths. In-place installation with `--force` can leave obsolete files behind. Finish or let old reviews expire before changing versions. If you preserve a compatible cache from the same installation, transfer it into the clean replacement before its first use. When rolling back to a version that cannot read the cache, restore a compatible backup or start from a whole-inbox review. Install the verified release into a clean target, start a fresh session, and discard approvals and manifests from earlier sessions.
 
 Report security issues via GitHub private vulnerability reporting when enabled.
