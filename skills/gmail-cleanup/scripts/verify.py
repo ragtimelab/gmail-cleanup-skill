@@ -7,6 +7,17 @@ import json
 import sys
 
 
+def inbox_query(end, *, start=None, full=False):
+    require(type(end) is int and end > 0, "Invalid review end")
+    if full:
+        require(start is None, "Whole inbox does not accept a start")
+        return f"in:inbox before:{end}"
+    if start is None:
+        start = max(1, end - 7 * 24 * 60 * 60)
+    require(type(start) is int and 0 < start < end, "Invalid review start")
+    return f"in:inbox after:{start} before:{end}"
+
+
 def require(condition, message):
     if not condition:
         raise ValueError(message)
@@ -130,9 +141,19 @@ def unique_object(pairs):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("seal", "approve", "check", "reconcile"))
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("seal", "approve", "check", "reconcile"):
+        commands.add_parser(name)
+    query = commands.add_parser("query")
+    query.add_argument("end", type=int)
+    scope = query.add_mutually_exclusive_group()
+    scope.add_argument("--start", type=int)
+    scope.add_argument("--full", action="store_true")
     args = parser.parse_args()
     try:
+        if args.command == "query":
+            print(json.dumps({"query": inbox_query(args.end, start=args.start, full=args.full)}))
+            return 0
         request = json.load(sys.stdin, object_pairs_hook=unique_object)
         if args.command == "seal":
             result = {"digest": seal(request)[1]}

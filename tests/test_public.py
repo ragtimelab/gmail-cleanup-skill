@@ -19,8 +19,7 @@ class PublicPackageTests(unittest.TestCase):
         self.write(SKILL / "references/external-notifications.md", "# Synthetic reference\n")
         self.write(SKILL / "references/execution.md", "# Synthetic execution\n")
         self.write(SKILL / "scripts/verify.py", "# Synthetic validator\n")
-        self.write(SKILL / "scripts/checkpoints.py", "# Synthetic checkpoint helper\n")
-        self.write(SKILL / "references/incremental-review.md", "# Synthetic scope reference\n")
+        self.write(SKILL / "references/review-scope.md", "# Synthetic scope reference\n")
 
     def git(self, *args):
         subprocess.run(("git", *args), cwd=self.repo, check=True, capture_output=True)
