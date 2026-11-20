@@ -11,7 +11,7 @@ REVIEW_FILES = {
     SKILL_ROOT + "references/external-notifications.md",
 }
 SUPPORT_FILES = {".github/workflows/verify.yml", ".gitignore", "LICENSE", "README.md",
-                 "tools/check_public.py"}
+                 "tools/check_public.py", "tools/release.py"}
 CLEANUP_FILES = REVIEW_FILES | {
     SKILL_ROOT + "references/execution.md",
     SKILL_ROOT + "scripts/verify.py",
@@ -24,12 +24,22 @@ HISTORICAL_LAYOUTS = {
     "1b3134ff1556dfcdba7d3abdfa0d2d4345e0656b": (CLEANUP_FILES, {"tests/test_verify.py"}),
     "66a35ddf420387e88e7d523419366fe4f00b6139": (REVIEW_FILES, {"tests/test_public.py"}),
 }
-CURRENT_LAYOUT = (
+CHECKPOINT_LAYOUT = (
     CLEANUP_FILES | {
         SKILL_ROOT + "references/incremental-review.md",
         SKILL_ROOT + "scripts/checkpoints.py",
     },
     LEGACY_LAYOUT[1] | {"tests/test_checkpoints.py"},
+)
+HISTORICAL_LAYOUTS.update({
+    "642f97080877989beb8f0c0164ceaf64d602b9d1": CHECKPOINT_LAYOUT,
+    "5e7435e97722f6ad4db03a719330c9ab860d6d69": CHECKPOINT_LAYOUT,
+    "76c6e3c262e8ec68656f58f08e9a5755cad26ef1": CHECKPOINT_LAYOUT,
+    "81d81d7e706db26e2e264c3573e5b38690de2ccc": CHECKPOINT_LAYOUT,
+})
+CURRENT_LAYOUT = (
+    CLEANUP_FILES | {SKILL_ROOT + "references/review-scope.md"},
+    LEGACY_LAYOUT[1] | {"tests/test_release.py"},
 )
 
 

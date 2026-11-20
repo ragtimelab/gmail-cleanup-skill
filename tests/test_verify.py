@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "skills/gmail-cleanup/scripts"))
-from verify import approve, check, reconcile, seal
+from verify import approve, check, inbox_query, reconcile, seal
 
 
 def candidate(account, message_id):
@@ -15,6 +15,18 @@ def candidate(account, message_id):
 
 def identity(account, message_id):
     return {"account": account, "id": message_id}
+
+
+class InboxQueryTests(unittest.TestCase):
+    def test_default_explicit_period_and_whole_inbox(self):
+        self.assertEqual(inbox_query(1_000_000), "in:inbox after:395200 before:1000000")
+        self.assertEqual(inbox_query(1_000_000, start=123),
+                         "in:inbox after:123 before:1000000")
+        self.assertEqual(inbox_query(1_000_000, full=True), "in:inbox before:1000000")
+
+    def test_inverted_period_is_rejected(self):
+        with self.assertRaises(ValueError):
+            inbox_query(200, start=201)
 
 
 class VerifyTests(unittest.TestCase):
