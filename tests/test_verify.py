@@ -68,6 +68,16 @@ class VerifyTests(unittest.TestCase):
         self.observe(["INBOX", "STARRED"])
         self.assertEqual(len(check(self.payload)["held"]), 1)
 
+    def test_only_designated_custom_label_protects_message(self):
+        self.manifest["items"][0]["labels"].append("Label_category")
+        self.payload["approval"]["digest"] = seal(self.manifest)[1]
+        self.freeze_approval()
+
+        self.observe(["INBOX", "IMPORTANT", "Label_category"])
+        self.assertEqual(check(self.payload)["ready"], [self.first])
+        self.observe(["INBOX", "IMPORTANT", "Label_category", "Label_keep"])
+        self.assertEqual(check(self.payload)["held"][0]["reason"], "hold_or_label_change")
+
     def test_no_blind_retry_missing_or_held(self):
         self.assertEqual(len(check(self.payload)["held"]), 1)
         self.observe(["INBOX", "IMPORTANT"], hold=True)
