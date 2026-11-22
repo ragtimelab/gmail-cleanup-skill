@@ -20,7 +20,7 @@ For a project-scope installation, use `--scope project` from that project. In a 
 
 The default covers every connected Gmail account. You can name individual accounts. The default is a rolling seven-day window and includes read and unread mail. Request a whole-inbox or longer period review to include older mail.
 
-The skill reports how many messages it reviewed, how many were unread in that scope, what needs attention, and which messages qualify as Trash candidates. Only read messages qualify when they have no remaining action, retention signal, or evidence to preserve. The skill freezes the exact set you approve, uses the official Gmail connector to move eligible approved messages, and reads back their final labels and read state.
+The skill reports how many messages it reviewed, how many were unread in that scope, what needs attention, and which messages qualify as Trash candidates. Read mail is proposed by default. The skill keeps explicit retention marks, personal financial records, and actively tracked notifications, and reports unfinished actions for confirmation regardless of read state. A Mail.app flag protects a Gmail message when it syncs as a Gmail star. See the [classification rules](skills/gmail-cleanup/SKILL.md#classification). The skill freezes the exact set you approve, uses the official Gmail connector to move eligible approved messages, and reads back their final labels and read state.
 
 Each review starts from the requested window. The skill does not write checkpoints or require writable skill storage. The Gmail connector and Python validator must be available in the execution environment. The current review and approval remain private to the conversation.
 
